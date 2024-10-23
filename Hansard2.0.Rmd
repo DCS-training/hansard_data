@@ -1,0 +1,439 @@
+---
+title: "Obtaining Data from the Hansard Website"
+author: "Lucia Michielin"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This Document contains instruction and code on how to obtain data from the Hansard website.
+A simple scraping approach would not work because the website is built with Cloudfare and therefore block any fetching request.
+
+The Hansard API has a cut out length of the speeches of around 200 character so that would not To circumvent this issue the following instruction show how to use a combination of R, Hansard API and, OpenRefine.
+For this reason this approach is only partially automated and will require some manual steps.
+
+## Note on ethic and legal aspects of using web scraping
+
+The data collected on the Hansard website are public domain data meant for the public to consult.
+If you are using this instruction to scrape other material make sure that this will not contradict the TOC of the website and that you are not going to scrape sensitive material.
+
+## Libraries needed
+
+```{r,results='hide', warning=FALSE, message=FALSE}
+#install.packages("httr") uncomment and run it if you do not have httr already installed
+#install.packages("tidyverse")uncomment and run it if you do not have httr already installed
+#install.packages("rvest")uncomment and run it if you do not have httr already installed
+
+library(tidyverse)
+library(httr)
+library(rvest)
+```
+
+# Step 1- Get the List of Info About Debates Using the Search API
+
+This instruction show how to collect speeches from the commons on debates having as a topic immigration.
+The keywords identified for this search are "migration", "immigration" and, "asylum".
+Please note that the API and the search page of the Hansard website work on a "and" logic so if you add multiple keywords in the same query the results will return only the result where both keywords are present.
+So if you have multiple keywords you need to search you will have to set up multiple searches.
+
+-   Go to <https://hansard-api.parliament.uk/swagger/ui/index#!/Search/Search_SearchDebates>
+
+-   Create a API query using the following info
+
+    -   Response Content Type: *Text/json*
+    -   format: *json*
+    -   queryParameters.house: *Commons*
+    -   queryParameters.startDate: *2008-01-01*
+    -   queryParameters.endDate: *2024-09-01*
+    -   queryParameters.searchTerm: *immigration*
+    -   queryParameters.take: *319* (update number based on number results)
+    -   queryParameters.outputType: *List*
+    -   queryParameters.orderBy: *SittingDateDesc*
+
+-   Press Try it out!
+
+-   Copy the Request URL content and past it in: 'response \<- GET('[***URL***]')'
+
+## Search Immigration
+
+```{r}
+ 
+# Getting response from API
+response <- GET('https://hansard-api.parliament.uk/search/debates.json?queryParameters.house=Commons&queryParameters.startDate=2008-01-01&queryParameters.endDate=2024-09-01&queryParameters.searchTerm=immigration&queryParameters.take=319&queryParameters.outputType=List&queryParameters.orderBy=SittingDateDesc')
+
+# Extract the content from the response
+Results<- content(response)
+
+#Extract the first sublist that contains all the results we are looking for
+debates<-Results[[1]]
+
+```
+
+### Loop through the Json list to extract info about the debates
+
+The information we are interested in are:
+
+-   the date of the debate (**\$SittingDate**)
+
+-   the debate id (**\$DebateSectionExtId**)
+
+-   the title of the debate (**\$Title**)
+
+-   the url of the page where the content of the debate is stored.
+    This can be built by linking together:
+
+    -   [**https://hansard.parliament.uk/Commons/**](https://hansard.parliament.uk/Commons/){.uri}
+
+    -   **\$SittingDate**
+
+    -   **/debates/**
+
+    -   **\$DebateSectionExtId**
+
+    -   **/**
+
+    -   **\$Title**
+
+```{r}
+# Initialize empty lists for SittingDate, DebateSectionExtId, Title, and URLs
+sitting_dates <- list()
+debate_ids <- list()
+titles <- list()
+urls <- list()
+
+# Loop through each debate and generate the URL
+for (i in 1:length(debates)) {
+  # Check if the current element is a list
+  if (is.list(debates[[i]])) {
+    # Extract fields
+    sitting_date <- debates[[i]]$SittingDate
+    debate_id <- debates[[i]]$DebateSectionExtId
+    title <- debates[[i]]$Title
+    
+    # Add the extracted fields to their respective lists
+    sitting_dates[[i]] <- sitting_date
+    debate_ids[[i]] <- debate_id
+    titles[[i]] <- title
+    
+    # Format the date as "YYYY-MM-DD"
+    formatted_date <- sub("T.*", "", sitting_date)
+    
+    # Remove spaces from the title
+    formatted_title <- gsub(" ", "", title)
+    
+    # Construct the URL
+    url <- paste0("https://hansard.parliament.uk/Commons/",
+                  formatted_date,
+                  "/debates/",
+                  debate_id,
+                  "/",
+                  formatted_title)
+    
+    # Add the URL to the list
+    urls[[i]] <- url
+  }
+}
+
+# Print the lists of SittingDate, DebateSectionExtId, Title, and URLs
+Sitting_Dates<-unlist(sitting_dates)
+Sitting_Dates<- sub("T00:00:00", "",Sitting_Dates) #removing the time from the date 
+
+Debate_Ids<-unlist(debate_ids)#unlist the debate_ids 
+
+Titles<-unlist(titles)#unlist the titles 
+
+Urls<-unlist(urls)#unlist the urls
+
+LinksDataFrame<-data.frame(Sitting_Dates, Titles,Debate_Ids,Urls) # link the info together
+
+```
+
+## Search Migration
+
+Now we need to replicate the same steps using the migration keyword
+
+```{r}
+# Get data from API
+response1 <- GET('https://hansard-api.parliament.uk/search/debates.json?queryParameters.house=Commons&queryParameters.startDate=2008-01-01&queryParameters.endDate=2024-09-01&queryParameters.searchTerm=migration&queryParameters.take=319&queryParameters.outputType=List&queryParameters.orderBy=SittingDateDesc')
+
+# Extract the content from the response
+Results1<- content(response1)
+
+debates1<-Results1[[1]]
+```
+
+### Loop through the Json list to extract info about the debates
+
+```{r}
+# Initialize lists for SittingDate, DebateSectionExtId, Title, and URLs
+sitting_dates <- list()
+debate_ids <- list()
+titles <- list()
+urls <- list()
+
+# Loop through each debate and generate the URL
+for (i in 1:length(debates1)) {
+  # Check if the current element is a list
+  if (is.list(debates1[[i]])) {
+    # Extract fields
+    sitting_date <- debates1[[i]]$SittingDate
+    debate_id <- debates1[[i]]$DebateSectionExtId
+    title <- debates1[[i]]$Title
+    
+    # Add the extracted fields to their respective lists
+    sitting_dates[[i]] <- sitting_date
+    debate_ids[[i]] <- debate_id
+    titles[[i]] <- title
+    
+    # Format the date as "YYYY-MM-DD"
+    formatted_date <- sub("T.*", "", sitting_date)
+    
+    # Remove spaces from the title
+    formatted_title <- gsub(" ", "", title)
+    
+    # Construct the URL
+    url <- paste0("https://hansard.parliament.uk/Commons/",
+                  formatted_date,
+                  "/debates/",
+                  debate_id,
+                  "/",
+                  formatted_title)
+    
+    # Add the URL to the list
+    urls[[i]] <- url
+  }
+}
+
+# Convert lists to vectors and clean the SittingDate format
+Sitting_Dates <- sub("T00:00:00", "", unlist(sitting_dates))
+Debate_Ids <- unlist(debate_ids)
+Titles <- unlist(titles)
+Urls <- unlist(urls)
+
+# Create a data frame to organize the extracted information
+LinksDataFrame1 <- data.frame(Sitting_Dates, Titles, Debate_Ids, Urls)
+```
+
+## Search Asylum
+
+And again for asylum
+
+```{r}
+
+# Get data from API
+response2 <- GET('https://hansard-api.parliament.uk/search/debates.json?queryParameters.house=Commons&queryParameters.startDate=2008-01-01&queryParameters.endDate=2024-09-01&queryParameters.searchTerm=asylum&queryParameters.take=319&queryParameters.outputType=List&queryParameters.orderBy=SittingDateDesc')
+
+# Extract the content from the response
+Results2<- content(response2)
+
+debates2<-Results2[[1]]
+```
+
+### Loop through the Json list to extract info about the debates
+
+```{r}
+# Initialize lists for SittingDate, DebateSectionExtId, Title, and URLs
+sitting_dates <- list()
+debate_ids <- list()
+titles <- list()
+urls <- list()
+
+# Loop through each debate and generate the URL
+for (i in 1:length(debates2)) {
+  # Check if the current element is a list
+  if (is.list(debates2[[i]])) {
+    # Extract fields
+    sitting_date <- debates2[[i]]$SittingDate
+    debate_id <- debates2[[i]]$DebateSectionExtId
+    title <- debates2[[i]]$Title
+    
+    # Add the extracted fields to their respective lists
+    sitting_dates[[i]] <- sitting_date
+    debate_ids[[i]] <- debate_id
+    titles[[i]] <- title
+    
+    # Format the date as "YYYY-MM-DD"
+    formatted_date <- sub("T.*", "", sitting_date)
+    
+    # Remove spaces from the title
+    formatted_title <- gsub(" ", "", title)
+    
+    # Construct the URL
+    url <- paste0("https://hansard.parliament.uk/Commons/",
+                  formatted_date,
+                  "/debates/",
+                  debate_id,
+                  "/",
+                  formatted_title)
+    
+    # Add the URL to the list
+    urls[[i]] <- url
+  }
+}
+
+# Convert lists to vectors and clean the SittingDate format
+Sitting_Dates <- sub("T00:00:00", "", unlist(sitting_dates))
+Debate_Ids <- unlist(debate_ids)
+Titles <- unlist(titles)
+Urls <- unlist(urls)
+
+# Create a data frame to organize the extracted information
+LinksDataFrame2 <- data.frame(Sitting_Dates, Titles, Debate_Ids, Urls)
+```
+
+## Merge Datasets and Remove Duplicates
+
+```{r}
+FullData<-rbind(LinksDataFrame, LinksDataFrame1,LinksDataFrame2)
+FullDataClean<-FullData %>% 
+  distinct(Debate_Ids, .keep_all = TRUE)
+
+#Remove whitespaces
+
+FullDataClean$Titles <- trimws(FullDataClean$Titles)
+
+#Remove semicolon in URL while ignoring the semicolon after https 
+
+FullDataClean$Urls <- sub(":(?!//)", "", FullDataClean$Urls, perl = TRUE)
+
+
+```
+
+## Export the Dataframe
+
+```{r}
+
+write_csv(FullDataClean, "LinksDataFrame.csv")
+```
+
+# Step 2 - Fetch the Html of Each Debate Page
+
+The next step will have to be performed in Open Refine.
+
+Open Refine is an open source tool for working with messy data: cleaning it; transforming it from one format into another.
+
+You can download it [here](https://openrefine.org/download)
+
+More info and instruction on how to use OpenRefine can be found [here](https://datacarpentry.org/openrefine-socialsci/)
+
+-   Open the exported dataframe in Open Refine
+-   Press on URL\>Edit column\>Add column by fetching URL
+-   Name the result column **fetch**
+-   On the new column fetch\>facet\>Costumized facets\>Facet by blank(null or empty strings)
+
+The true results are the cell that did not contain a correct URL so they will have to be manually fixed them.
+Most times is a title that repeat or the last parenthesis need to be removed
+
+A couple need to be fetch by hand by going on developer tools select the first row of html, right click of the mouse, copy outer html and then copied and pasted in the cell
+
+-   Export the Link Data Frame.csv file and save it in the data folder, then follow the instruction below
+
+# Step 3 - Extract Information from the HTMLs
+
+## Import the new file
+
+```{r cars}
+Data<-read_csv("data/LinksDataFrame.csv")
+```
+
+If you are working on a large dataset it could be a good idea to test the below on a subset.
+
+```{r}
+Subset<-head(Data,5)
+```
+
+If you are working on a subset just substitute Data with Subset in the cell below
+
+## Loop through the Html of the Hansard pages
+
+```{r}
+
+# Function to extract speaker, party, and speech from HTML
+extract_contributions <- function(html) {
+    parsed_html <- read_html(html)
+    
+    contributions <- parsed_html %>%
+        html_nodes(".contribution") %>%
+        lapply(function(node) {
+            speaker <- node %>%
+                html_node(".with-link .primary-text") %>%
+                html_text(trim = TRUE)
+            
+            party <- node %>%
+                html_node(".secondary-text") %>%
+                html_text(trim = TRUE) %>%
+                trimws()                      # Remove leading/trailing whitespace
+            
+            speech <- node %>%
+                html_nodes(".hs_Para") %>%
+                html_text(trim = TRUE) %>%
+                paste(collapse = " ")  # Concatenate all paragraphs
+            
+            contributionid<-node %>%
+                html_attr("data-contribution-id")
+            
+            # Attempt to extract the speaker ID safely
+            speakerid_node <- node %>%
+                html_nodes('.attributed-to-details.with-link')
+            
+            # Check if speakerid_node is not empty
+            if (length(speakerid_node) > 0) {
+                speakerid <- speakerid_node %>%
+                    html_attr('href')
+            } else {
+                speakerid <- NA  # Assign NA if not found
+            }
+            
+              
+            
+            data.frame(Speaker = speaker, Party = party, Speech = speech, ContributionID = contributionid, SpeakerId= speakerid, stringsAsFactors = FALSE)
+        }) %>%
+        bind_rows()  # Combine into a single data frame
+    
+    return(contributions)
+}
+
+# Apply the extraction function to the html_content column
+# Remember to substitute Data with Subset if you are working on a subset
+result <- Data %>%
+    rowwise() %>%
+    mutate(contributions = list(extract_contributions(fetch))) %>%
+    unnest(contributions)
+
+```
+
+### Clean up the results
+
+```{r}
+# Remove the link part of the SpeakerID
+result$SpeakerId <- gsub("/search/MemberContributions\\?house=Commons&memberId=", "", result$SpeakerId)
+
+# remove the rows where no speaker was identified 
+result_cleaned <- result %>%
+    filter(!is.na(Speaker))
+head(result_cleaned)
+```
+
+### Export the results
+
+The last step is to remove the column containing the full html and export the file
+
+```{r}
+#Remove fetch column
+clened_No_Fetch<-result_cleaned[,c(1:4, 6:10)]
+write_csv(clened_No_Fetch, "data/Speaches.csv")
+```
+
+If you want to quickly explore the data obtained you can open the Speaches.csv spreadsheet into open refine.
+
+Openrefine would also work well to uniform speakers names spelling.
+E.g.
+Crispin Blunt is present in the dataset as Crispin Blunt, Mr. Blunt, and Mr. Crispin Blunt but will always have the Speaker id 104.
+
+# The End 
